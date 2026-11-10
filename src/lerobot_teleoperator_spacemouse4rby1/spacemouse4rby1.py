@@ -228,6 +228,7 @@ class SpaceMouse4Rby1(Teleoperator):
 
 
         # 각 마우스의 1번 버튼으로 위치+회전 / 회전만 전환한다.
+        raw_inputs = {side: dict(raw) for side, raw in inputs.items()}
         inputs = {side: dict(raw) for side, raw in inputs.items()}
         for side in ("left", "right"):
             raw = inputs[side]
@@ -289,24 +290,13 @@ class SpaceMouse4Rby1(Teleoperator):
             now=now,
         )
 
-        # 마우스를 놓은 쪽 팔만 현재 실제 자세로 목표를 재설정한다.
-        # 반대쪽 팔의 이번 주기 입력과 그리퍼 목표는 그대로 유지한다.
+        # 입력이 중립이 되거나 오래되면 적분은 중지하고 마지막 목표를 유지한다.
+        # 실제 자세로 목표를 재설정하면 추종 오차가 목표에 누적될 수 있다.
+        # 로봇은 남아 있는 추종 오차를 계속 따라갈 수 있다.
         if released_sides:
-            current_poses = self.state_reader.read()
-
-            for side in released_sides:
-                poses[side] = current_poses[side].copy()
-
-            self.integrator.reset(
-                poses=poses,
-                grippers=grippers if self.config.use_gripper else None,
-            )
-
-            poses, grippers = self.integrator.get_targets()
-
             print(
-                "[MOUSE DEBUG] 입력 해제: "
-                f"{', '.join(released_sides)} 목표를 현재 자세로 재설정",
+                "[MOUSE DEBUG] 입력 중립 또는 시간 초과: "
+                f"{', '.join(released_sides)} 마지막 목표 유지",
                 flush=True,
             )
             
@@ -316,24 +306,46 @@ class SpaceMouse4Rby1(Teleoperator):
 
         # 0.5초마다 마우스 입력, 목표 위치, 실제 위치 확인
         if now >= getattr(self, "_next_motion_debug", 0.0):
-            raw = inputs["left"]
-            target_xyz = poses["left"][:3, 3]
-            actual_xyz = actual["left"][:3, 3]
+            raw = raw_inputs["left"]
+            mode_input = inputs["left"]
+            target_pose = poses["left"]
+            actual_pose = actual["left"]
+            target_xyz = target_pose[:3, 3]
+            actual_xyz = actual_pose[:3, 3]
+            # TCP는 설정한 arm_6 로컬 오프셋 기준의 추정 위치이다.
+            target_tcp_xyz = target_xyz + target_pose[:3, :3] @ self.integrator.tcp_offset
+            actual_tcp_xyz = actual_xyz + actual_pose[:3, :3] @ self.integrator.tcp_offset
+            rotation_error = Rotation.from_matrix(
+                actual_pose[:3, :3].T @ target_pose[:3, :3]
+            ).magnitude()
 
             print(
                 "[MOUSE DEBUG]",
-                "input=",
+                "raw_input=",
                 {
                     key: round(float(raw[key]), 3)
                     for key in ("x", "y", "z", "roll", "pitch", "yaw")
                 },
+                "mode_input=",
+                {
+                    key: round(float(mode_input[key]), 3)
+                    for key in ("x", "y", "z", "roll", "pitch", "yaw")
+                },
                 "input_age_s=", round(now - float(raw["t"]), 3),
-                "target_xyz=", np.round(target_xyz, 4),
-                "actual_xyz=", np.round(actual_xyz, 4),
-                "error_m=", round(
+                "mode=", "rotation_only" if self._rotation_only["left"] else "translation_rotation",
+                "target_arm6_xyz=", np.round(target_xyz, 4),
+                "actual_arm6_xyz=", np.round(actual_xyz, 4),
+                "target_tcp_xyz=", np.round(target_tcp_xyz, 4),
+                "actual_tcp_xyz=", np.round(actual_tcp_xyz, 4),
+                "arm6_error_m=", round(
                     float(np.linalg.norm(target_xyz - actual_xyz)),
                     5,
                 ),
+                "tcp_error_m=", round(
+                    float(np.linalg.norm(target_tcp_xyz - actual_tcp_xyz)),
+                    5,
+                ),
+                "rotation_error_rad=", round(float(rotation_error), 5),
                 flush=True,
             )
 
