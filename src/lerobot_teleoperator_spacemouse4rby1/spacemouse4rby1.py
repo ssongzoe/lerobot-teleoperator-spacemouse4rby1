@@ -35,10 +35,7 @@ class SpaceMouse4Rby1(Teleoperator):
                 config.right_device,
             )
 
-        self.state_reader = Rby1StateReader(
-            config.robot_address,
-            config.robot_model,
-        )
+        self.state_reader = None
         self.integrator = DualPoseIntegrator(config)
         self.mapper = Rby1ActionMapper(config.use_gripper)
 
@@ -51,6 +48,9 @@ class SpaceMouse4Rby1(Teleoperator):
             "left": False,
             "right": False,
         }
+        self._rotation_only = {"left": False, "right": False}
+        self._mode_button_pressed = {"left": False, "right": False}
+        self._mode_wait_neutral = {"left": False, "right": False}
 
     @property
     def action_features(self):
@@ -76,7 +76,6 @@ class SpaceMouse4Rby1(Teleoperator):
 
         try:
             stack.enter_context(self.devices)
-            stack.enter_context(self.state_reader)
         except BaseException:
             stack.close()
             raise
@@ -109,19 +108,33 @@ class SpaceMouse4Rby1(Teleoperator):
                 "torso/mobile base disabled, and matching use_gripper."
             )
 
-        if robot._config.address != self.config.robot_address:
-            raise ValueError(
-                "Robot and teleoperator addresses must match."
-            )
+        if self._follower is robot and self.state_reader is not None:
+            self.reset_targets()
+            return
+        if self._follower is not None:
+            raise RuntimeError("Teleoperator is already bound to a robot.")
 
-        self._follower = robot
-        self.reset_targets()
+        # 별도 상태 조회 연결을 만들되 주소는 robot 설정에서 가져온다.
+        reader = Rby1StateReader(robot._config.address, self.config.robot_model)
+        reader.connect()
+        try:
+            self.state_reader = reader
+            self._follower = robot
+            self.reset_targets()
+        except BaseException:
+            reader.disconnect()
+            self.state_reader = None
+            self._follower = None
+            raise
+        self._stack.callback(reader.disconnect)
 
     def reset_targets(self):
         """현재 실제 pose와 그리퍼 위치를 목표로 다시 설정한다."""
         if not self.is_connected:
             raise RuntimeError("Teleoperator is not connected.")
 
+        if self.state_reader is None:
+            raise RuntimeError("Call bind_robot(robot) before reset_targets().")
         self._initialized = False
         grippers = None
 
@@ -214,6 +227,32 @@ class SpaceMouse4Rby1(Teleoperator):
 
 
 
+        # 각 마우스의 1번 버튼으로 위치+회전 / 회전만 전환한다.
+        inputs = {side: dict(raw) for side, raw in inputs.items()}
+        for side in ("left", "right"):
+            raw = inputs[side]
+            buttons = raw["buttons"]
+            index = self.config.mode_toggle_button
+            pressed = index < len(buttons) and bool(buttons[index])
+            if pressed and not self._mode_button_pressed[side]:
+                self._rotation_only[side] = not self._rotation_only[side]
+                self._mode_wait_neutral[side] = True
+                name = "회전만" if self._rotation_only[side] else "위치 + 회전"
+                print(f"[MODE] {side}: {name}", flush=True)
+            self._mode_button_pressed[side] = pressed
+
+            if self._mode_wait_neutral[side]:
+                axes = np.array([float(raw[k]) for k in AXES])
+                if not np.isfinite(axes).all():
+                    raise ValueError("Invalid SpaceMouse axes.")
+                if not pressed and np.all(np.abs(axes) <= self.config.deadzone):
+                    self._mode_wait_neutral[side] = False
+                for axis in AXES:
+                    raw[axis] = 0.0
+            elif self._rotation_only[side]:
+                for axis in ("x", "y", "z"):
+                    raw[axis] = 0.0
+
         # 양쪽 마우스가 각각 움직임 입력 중인지 확인한다.
         active = {}
 
@@ -270,6 +309,7 @@ class SpaceMouse4Rby1(Teleoperator):
                 f"{', '.join(released_sides)} 목표를 현재 자세로 재설정",
                 flush=True,
             )
+            
         # 로봇이 목표를 따라가지 못할 때
         # 가상 목표가 계속 멀어지는 것을 제한한다.
         actual = self.state_reader.read()
@@ -343,6 +383,7 @@ class SpaceMouse4Rby1(Teleoperator):
         finally:
             self._stack = None
             self._follower = None
+            self.state_reader = None
             self._initialized = False
             self._wait_neutral = True
             self._last_update = None

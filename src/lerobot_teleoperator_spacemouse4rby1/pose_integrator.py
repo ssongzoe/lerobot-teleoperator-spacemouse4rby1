@@ -91,6 +91,7 @@ class DualPoseIntegrator:
 
         self._poses = {}
         self._grippers = {}
+        self._gripper_button_pressed = {side: False for side in SIDES}
 
     def reset(self, poses, grippers=None):
         """현재 로봇 pose와 그리퍼 위치를 초기 목표로 설정한다."""
@@ -258,29 +259,12 @@ class DualPoseIntegrator:
             )
 
             if self.config.use_gripper:
-                open_index = self.config.gripper_open_button
-                close_index = self.config.gripper_close_button
-
-                opening = (
-                    open_index < len(buttons)
-                    and bool(buttons[open_index])
-                )
-                closing = (
-                    close_index < len(buttons)
-                    and bool(buttons[close_index])
-                )
-
-                # 두 버튼을 동시에 누르면 변화 없음.
-                velocity = int(opening) - int(closing)
-
-                grippers[side] = float(
-                    np.clip(
-                        grippers[side]
-                        + velocity * self.config.gripper_speed * dt,
-                        0.0,
-                        1.0,
-                    )
-                )
+                index = self.config.gripper_toggle_button
+                pressed = index < len(buttons) and bool(buttons[index])
+                if pressed and not self._gripper_button_pressed[side]:
+                    grippers[side] = 0.0 if grippers[side] >= 0.5 else 1.0
+                    print(f"[GRIPPER] {side}: {'close' if grippers[side] == 0.0 else 'open'}", flush=True)
+                self._gripper_button_pressed[side] = pressed
 
         # 양팔 계산이 모두 성공한 뒤 내부 목표를 갱신한다.
         self._poses = targets

@@ -81,15 +81,15 @@ python check_mouse_path.py
 ```bash
 lerobot-teleoperate \
   --robot.type=rby1 \
-  --robot.address=192.168.30.1:50051 \
+  --robot.address=127.0.0.1:50051 \
   --robot.action_mode=ee \
-  --robot.use_gripper=true \
+  --robot.use_gripper=false \
   --robot.move_to_ready_on_connect=true \
   --teleop.type=spacemouse4rby1 \
-  --teleop.robot_address=192.168.30.1:50051 \
-  --teleop.left_device=/dev/hidraw6 \
-  --teleop.right_device=/dev/hidraw11 \
-  --teleop.use_gripper=true \
+  --teleop.robot_address=127.0.0.1:50051 \
+  --teleop.left_device=/dev/hidraw7 \
+  --teleop.right_device=/dev/hidraw8 \
+  --teleop.use_gripper=false \
   --teleop.translation_speed_m_s=0.03 \
   --teleop.rotation_speed_rad_s=0.15 \
   --fps=30 \

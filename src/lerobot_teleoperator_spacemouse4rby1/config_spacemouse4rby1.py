@@ -15,8 +15,7 @@ class SpaceMouse4Rby1Config(TeleoperatorConfig):
     # True면 왼쪽 마우스 한 대로 테스트
     single_device: bool = False
 
-    # 초기 pose 조회에 사용할 로봇 주소
-    robot_address: str = "127.0.0.1:50051"   #"192.168.30.1:50051"
+    # 상태 조회 주소는 연결된 로봇의 설정을 사용한다.
     robot_model: str = "auto"
 
     # 입력 처리
@@ -29,8 +28,8 @@ class SpaceMouse4Rby1Config(TeleoperatorConfig):
 
     # 그리퍼: 0=닫힘, 1=열림
     use_gripper: bool = True
-    gripper_open_button: int = 14
-    gripper_close_button: int = 0
+    gripper_toggle_button: int = 0
+    mode_toggle_button: int = 1
 
     # 실제 pose와 목표 pose 사이의 최대 허용 차이
     max_target_lead_m: float = 0.05
@@ -72,10 +71,7 @@ class SpaceMouse4Rby1Config(TeleoperatorConfig):
             if not 0.0 < getattr(self, name) < float("inf"):
                 raise ValueError(f"{name} must be finite and positive.")
 
-        if self.gripper_open_button < 0 or self.gripper_close_button < 0:
-            raise ValueError("Gripper button indices must be non-negative.")
-
-        if self.gripper_open_button == self.gripper_close_button:
-            raise ValueError(
-                "Gripper open and close buttons must be different."
-            )
+        if self.gripper_toggle_button < 0 or self.mode_toggle_button < 0:
+            raise ValueError("Button indices must be non-negative.")
+        if self.use_gripper and self.gripper_toggle_button == self.mode_toggle_button:
+            raise ValueError("Gripper and mode buttons must be different.")
